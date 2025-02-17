@@ -12,6 +12,21 @@ function setOpenRouterApiKey(key) {
     localStorage.setItem('OPENROUTER_API_KEY', key)
 }
 
+let SELECTED_MODEL = localStorage.getItem('SELECTED_MODEL') || 'meta-llama/llama-3.2-3b-instruct:free';
+
+const AVAILABLE_MODELS = [
+  { id: 'meta-llama/llama-3.2-3b-instruct:free', name: 'Llama 3.2 3B (Free)' },
+  { id: 'google/gemini-2.0-flash-thinking-exp-1219:free', name: 'Gemini 2.0 Flash (Free)' },
+  { id: 'deepseek/deepseek-rl-distill-llama-70b:free', name: 'DeepSeek R1 Distill (Free)' },
+  { id: 'qwen/qwen2.5-v1-72b-instruct:free', name: 'Qwen 2.5 VL (Free)' }
+];
+
+function setSelectedModel(modelId) {
+  SELECTED_MODEL = modelId;
+  localStorage.setItem('SELECTED_MODEL', modelId);
+}
+
+
 const CE = "CE";
 const EXTRA_CE = "EXTRA_CE";
 
@@ -616,18 +631,31 @@ $(document).ready(async function () {
                     </svg>
                     Code Assistant
                   </h3>
-                  <div class="flex items-center gap-2">
-                    <input
-                        type="password"
-                        id="openrouter-api-key"
-                        class="flex-1 bg-[#1e1e1e] text-[#cccccc] text-sm rounded border border-[#3e3e42] px-2 py-1 focus:outline-none focus:border-[#0078d4]"
-                        placeholder="Enter OpenRouter API Key"
-                        value="${OPENROUTER_API_KEY}"
-                    />
-                    <button id="save-api-key" class="bg-[#0078d4] hover:bg-[#006bb3] text-white text-sm px-2 py-1 rounded transition-colors">
-                        Save Key
-                    </button>
-                    </div>
+                    <div class="flex items-center gap-2">
+                        <input
+                            type="password"
+                            id="openrouter-api-key"
+                            class="flex-1 bg-[#1e1e1e] text-[#cccccc] text-sm rounded border border-[#3e3e42] px-2 py-1 focus:outline-none focus:border-[#0078d4]"
+                            placeholder="Enter OpenRouter API Key"
+                            value="${OPENROUTER_API_KEY}"
+                        />
+                        <button id="save-api-key" class="bg-[#0078d4] hover:bg-[#006bb3] text-white text-sm px-2 py-1 rounded transition-colors">
+                            Save Key
+                        </button>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            <select
+                                id="model-selector"
+                                class="flex-1 bg-[#1e1e1e] text-[#cccccc] text-sm rounded border border-[#3e3e42] px-2 py-1 focus:outline-none focus:border-[#0078d4]"
+                            >
+                                ${AVAILABLE_MODELS.map(model => `
+                                <option value="${model.id}" ${model.id === SELECTED_MODEL ? 'selected' : ''}>
+                                    ${model.name}
+                                </option>
+                                `).join('')}
+                            </select>
+                        </div>
                   <p class="chat-description text-sm text-[#8a8a8a]">Ask questions about your code or get help with programming</p>
                 </div>
               </div>
@@ -753,11 +781,11 @@ $(document).ready(async function () {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${OPENROUTER_API_KEY}`, // Template literal for variable substitution
+                  'Authorization': `Bearer ${OPENROUTER_API_KEY}`, 
                    },
                 body: JSON.stringify({
-                  model: 'google/gemini-2.0-flash-thinking-exp:free',
-                  messages: [ // Messages should be an array
+                  model: SELECTED_MODEL,
+                  messages: [ 
                     {
                       role: 'system',
                       content: `You are an expert programming assistant. You have access to the following code context:
@@ -817,12 +845,19 @@ $(document).ready(async function () {
             // Api Key Handling
             const apiKeyInput = chatContainer.querySelector("#openrouter-api-key")
             const saveApiKeyBtn = chatContainer.querySelector("#save-api-key")
+            const modelSelector = chatContainer.querySelector("#model-selector")
             
             saveApiKeyBtn.addEventListener("click", () => {
                 const newKey = apiKeyInput.value.trim()
                 setOpenRouterApiKey(newKey)
                 addAssistantMessage("API key has been saved.")
     
+            })
+
+            modelSelector.addEventListener("change", (e) => {
+                setSelectedModel(e.target.value);
+                const selectedModelName = AVAILABLE_MODELS.find(m => m.id === e.target.value)?.name; // Optional chaining
+                addAssistantMessage(`Model changed to ${selectedModelName || "unknown"}`); // Handle potential undefined
             })
             
             container.getElement().append(chatContainer)
