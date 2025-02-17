@@ -25,3 +25,58 @@ html, body {
 .judge0-hidden {
     display: none !important;
 }
+
+.errorHighlight {
+    background-color: rgba(255, 0, 0, 0.2);
+    border-left: 3px solid #ff0000;
+  }
+  
+  .errorGlyphMargin {
+    background-color: #ffeeee;
+    border-radius: 50%;
+    margin-left: 5px;
+  }
+  
+  .diff-suggestion {
+    z-index: 1000;
+  }
+  
+  .diff-content {
+    max-height: 200px;
+  }
+
+.diff-content::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  .diff-content::-webkit-scrollbar-track {
+    background: #1e1e1e;
+  }
+  
+  .diff-content::-webkit-scrollbar-thumb {
+    background: #3e3e42;
+    border-radius: 4px;
+  }
+  
+  .diff-content::-webkit-scrollbar-thumb:hover {
+    background: #4e4e52;
+  }
+  
+  /* Style for diff lines */
+  .diff-content {
+    line-height: 1.5;
+  }
+  
+  .diff-content > span {
+    display: block;
+    white-space: pre;
+  }
+  
+  .diff-content span[data-prefix="-"] {
+    color: #ff6b6b;
+  }
+  
+  .diff-content span[data-prefix="+"] {
+    color: #51cf66;
+  }

@@ -170,10 +170,11 @@ function handleRunError(jqXHR) {
     })), "*");
 }
 
-function handleResult(data) {
+async function handleResult(data) {
     const tat = Math.round(performance.now() - timeStart);
     console.log(`It took ${tat}ms to get submission result.`);
 
+    console.log()
     const status = data.status;
     const stdout = decode(data.stdout);
     const compileOutput = decode(data.compile_output);
@@ -186,6 +187,11 @@ function handleResult(data) {
 
     stdoutEditor.setValue(output);
 
+    if (status.id === 6) { // Compilation Error
+        const selectedLanguage = $selectLanguage.find(":selected").text();
+        handleSyntaxError(sourceEditor.getValue(), selectedLanguage, output);
+      }
+
     $runBtn.removeClass("disabled");
 
     window.top.postMessage(JSON.parse(JSON.stringify({
@@ -195,6 +201,224 @@ function handleResult(data) {
         memory: data.memory,
         output: output
     })), "*");
+}
+
+async function handleSyntaxError(sourceCode, language, error) {
+    if (!OPENROUTER_API_KEY) {
+      showError('API Key Required', 'Please set your OpenRouter API key in the Code Assistant panel to get AI suggestions for syntax errors.');
+      return;
+    }
+  
+    // Create a temporary marker to show we're processing
+    const errorLineMatch = error.match(/error: Error on line (\d+)/);
+    const errorLine = errorLineMatch ? parseInt(errorLineMatch[1]) : null;
+  
+    if (errorLine) {
+      sourceEditor.deltaDecorations([], [{
+        range: new monaco.Range(errorLine, 1, errorLine, 1),
+        options: {
+          isWholeLine: true,
+          className: 'errorHighlight',
+          glyphMarginClassName: 'errorGlyphMargin'
+        }
+      }]);
+    }
+  
+    try {
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'Judge IDE'
+        },
+        body: JSON.stringify({
+            model: SELECTED_MODEL,
+            messages: [
+              {
+                role: 'system',
+                content: `You are an expert programming assistant. A user has code that produced a syntax error.
+          Analyze the code and error, then provide a specific fix. Format your response as a diff in the following format:
+          
+          ERROR ANALYSIS: <brief explanation of the error>
+          
+          DIFF:
+          <show only the lines that need to change, with - for removals and + for additions>
+          
+          EXPLANATION: <brief explanation of the fix>
+          
+          Keep your response concise and focused on the specific syntax error.`
+              },
+              {
+                role: 'user',
+                content: `Language: ${language}\nCode:\n${sourceCode}\n\nError:\n${error}`
+              }
+            ]
+        })
+    });
+
+        if (!response.ok) {
+            throw new Error(`API request failed: ${response.status} ${response.statusText}`)
+          }
+          
+          const data = await response.json()
+          const suggestion = data.choices[0].message.content
+          
+          // Parse the suggestion to extract diff
+          const diffMatch = suggestion.match(/DIFF:\n((.|\n)+)\nEXPLANATION:/)
+          const explanationMatch = suggestion.match(/EXPLANATION:\n((.|\n)+)$/)
+          
+          if (diffMatch) {
+            // Format the diff for display
+            const formattedDiff = diffMatch[1].split('\n').map(line => {
+              if (line.startsWith('+')) {
+                return `<span class="text-[#51cf66]">${line}</span>`;
+              } else if (line.startsWith('-')) {
+                return `<span class="text-[#ff6b6b]">${line}</span>`;
+              } else {
+                return `<span class="text-[#a8a8a8]">${line}</span>`;
+              }
+            }).join('\n');
+
+            // Create diff view
+            const diffContainer = document.createElement('div');
+            diffContainer.className = "diff-suggestion bg-[#1e1e1e] p-4 rounded-lg border border-[#3e3e42] fixed bottom-4 right-4 w-96 shadow-lg";
+            diffContainer.innerHTML = `
+            <div class="diff-header flex justify-between items-center mb-2">
+            <h3 class="text-[#cccccc] font-semibold">Suggested Fix</h3>
+            <div class="flex gap-2">
+                <button class="accept-diff bg-[#0078d4] hover:bg-[#006bb3] text-white px-3 py-1 rounded">
+                Accept
+                </button>
+                <button class="reject-diff bg-[#3e3e42] hover:bg-[#4e4e52] text-white px-3 py-1 rounded">
+                Reject
+                </button>
+            </div>
+            </div>
+            <pre class="diff-content text-sm font-mono text-[#cccccc] overflow-x-auto whitespace-pre">${formattedDiff}</pre>
+            ${explanationMatch ? `<p class="mt-2 text-sm text-[#8a8a8a]">${explanationMatch[1]}</p>` : ''}
+            `
+
+            // Remove any existing diff suggestions
+            const existingDiff = document.querySelector('.diff-suggestion');
+            if (existingDiff) {
+                existingDiff.remove();
+            }
+
+            document.body.appendChild(diffContainer);
+
+            // Handle accept/reject
+            diffContainer.querySelector('.accept-diff').addEventListener('click', () => {
+                const diff = diffMatch[1];
+                console.log('Raw diff:', diff);
+
+            // Split into lines and clean up
+            const lines = diff.split('\n')
+                .map(line => line.trimEnd()) // Keep leading whitespace, remove trailing
+                .filter(line => line.length > 0) // Remove empty lines
+
+            console.log('Parsed lines:', lines)
+
+            let currentCode = sourceEditor.getValue().split('\n')
+            console.log('Current code lines:', currentCode)
+
+            // Group the changes by finding consecutive - and + lines
+            let changes = []
+            let currentChange = { removals: [], additions: [] }
+
+            lines.forEach(line => {
+                if (line.startsWith('-')) {
+                  currentChange.removals.push(line.substring(1))
+                } else if (line.startsWith('+')) {
+                  currentChange.additions.push(line.substring(1))
+                } else {
+                  // Context Line - if we have a current change, save it and start a new one
+                  if (currentChange.removals.length > 0 ||
+                    currentChange.additions.length > 0) {
+                    changes.push(currentChange);
+                    currentChange = { removals: [], additions: [] }
+                  }
+                }
+              })
+              
+              // Add the last change if there is one
+              if (currentChange.removals.length > 0 || currentChange.additions.length > 0) {
+                changes.push(currentChange)
+              }
+              
+              console.log('Grouped changes:', changes)
+              
+              // Apply each change
+              changes.forEach(change => {
+                // Find where to apply the change
+                let targetLine = -1;
+
+                // First try to find the line to replace
+                if (change.removals.length > 0) {
+                // Look for the first line to remove
+                const lineToFind = change.removals[0]
+                targetLine = currentCode.findIndex(
+                    codeLine => codeLine.trim() === lineToFind.trim()
+                    ) 
+                }
+
+                // If we couldn't find the line and we have an error line, use that
+                if (targetLine === -1 && errorLine) {
+                    targetLine = errorLine - 1;
+                }
+
+                // If we still don't have a target line, try to find context
+                if (targetLine === -1) {
+                // Look for any non-empty lines around the changes
+                    const contextLines = lines.filter(line => !line.startsWith('+') && !line.startsWith('-'));
+                    for (const contextLine of contextLines) {
+                            targetLine = currentCode.findIndex(
+                            codeLine => codeLine.trim() === contextLine.trim()
+                        )
+                        if (targetLine !== -1) break
+                        }
+                }
+
+                // If we found a place to make the change
+                if (targetLine !== -1) {
+                    console.log("Applying change at line:", targetLine)
+                    console.log('Removing lines:', change.removals)
+                    console.log("Adding lines:", change.additions)
+                
+                    // Remove the old lines
+                    if (change.removals.length > 0) {
+                        currentCode.splice(targetLine, change.removals.length)
+                    }
+                
+                    // Add the new lines
+                    if (change.additions.length > 0) {
+                        currentCode.splice(targetLine, 0, ...change.additions)
+                    }
+                } else {
+                    console.log("Could not find target line for change")
+                }
+            })
+            
+            // Apply the changes
+            const newContent = currentCode.join('\n')
+            console.log("New content:", newContent)
+            
+            sourceEditor.setValue(newContent)
+            
+            // Remove the diff view
+            diffContainer.remove()
+        })
+
+        diffContainer.querySelector('.reject-diff').addEventListener('click', () => {
+            diffContainer.remove()
+            })
+        }
+                  
+    } catch (error) {
+        console.error('Error getting suggestion:', error)
+        showError('Error', 'Failed to get code suggestion. Please check your OpenRouter API key and try again.')
+    }
 }
 
 async function getSelectedLanguage() {
